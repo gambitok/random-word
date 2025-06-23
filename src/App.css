@@ -1,8 +1,7 @@
 #root {
   max-width: 1280px;
-  margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  min-width: 300px;
+  padding: 1rem;
 }
 
 .logo {
@@ -33,10 +32,45 @@
   }
 }
 
-.card {
-  padding: 2em;
-}
-
 .read-the-docs {
   color: #888;
+}
+
+.card {
+  background-color: #f5f5f5;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.buttons {
+  margin-top: 1rem;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.history {
+  margin-top: 1rem;
+  background-color: #fffbe6;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+}
+
+.error {
+  color: red;
+  font-weight: bold;
+}
+
+.clear-btn {
+  color: red;
+  background: none;
+  border: none;
+  margin-top: 0.5rem;
+  cursor: pointer;
+}
+
+.title {
+  font-size: 1.4rem;
+  margin-bottom: 0.5rem;
 }

@@ -1,145 +1,176 @@
-import { useEffect, useState } from "react"
-import { words } from "./data/words"
-import type { Word } from "./data/words"
+import { useEffect, useState, useRef } from "react"
+import { fetchWordWithOpenRouter } from "./api/openRouter"
+import "./App.css"
 
-const getRandomWord = (excludeWord?: string): Word => {
-  const filtered = words.filter((w) => w.word !== excludeWord)
-  return filtered[Math.floor(Math.random() * filtered.length)]
+type Word = {
+  word: string
+  translation: string
+  partOfSpeech: string
+  examples: string[]
 }
 
 export default function Popup() {
   const [current, setCurrent] = useState<Word | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [history, setHistory] = useState<Word[]>([])
   const [showAllHistory, setShowAllHistory] = useState(false)
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Встановити нове слово (без збереження)
-  const setNewWord = (word: Word) => {
-    setCurrent(word)
-    chrome.storage.local.set({ dailyWord: word })
+  const loadHistory = () => {
+    chrome.storage.local.get("history", (res) => {
+      setHistory(res.history || [])
+    })
   }
 
-  // Дізнатись, чи є слово в історії
-  const isInHistory = (word: Word) => {
-    return history.some((w) => w.word === word.word)
-  }
-
-  // Додати слово в історію
-  const addToHistory = (word: Word) => {
-    const updated = [...history, word].slice(-100) // максимум 100
+  const saveToHistory = (word: Word) => {
+    if (history.find((w) => w.word === word.word)) return
+    const updated = [...history, word].slice(-100)
     chrome.storage.local.set({ history: updated })
     setHistory(updated)
   }
 
-  // Видалити слово з історії
   const removeFromHistory = (word: Word) => {
     const updated = history.filter((w) => w.word !== word.word)
     chrome.storage.local.set({ history: updated })
     setHistory(updated)
   }
 
-  // Обробник кнопки зберегти/видалити
-  const handleSaveOrRemove = () => {
+  const isSaved = (word: Word | null) =>
+    word && history.some((w) => w.word === word.word)
+
+  const toggleSave = () => {
     if (!current) return
-    if (isInHistory(current)) {
+    if (isSaved(current)) {
       removeFromHistory(current)
     } else {
-      addToHistory(current)
+      saveToHistory(current)
     }
   }
 
-  // Наступне слово (без збереження)
-  const handleNext = () => {
-    const newWord = getRandomWord(current?.word)
-    setNewWord(newWord)
+  const fetchRandomWord = async (): Promise<string | null> => {
+    const res = await fetch("https://random-word-api.herokuapp.com/word?number=1")
+    if (!res.ok) return null
+    const [word] = await res.json()
+    return word || null
   }
 
-  // Завантаження зі сховища
+  const updateDailyWord = async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const random = await fetchRandomWord()
+      if (!random) throw new Error("Помилка отримання випадкового слова")
+
+      const data = await fetchWordWithOpenRouter(random)
+      const word: Word = { word: random, ...data }
+
+      setCurrent(word)
+      chrome.storage.local.set({ dailyWord: word })
+    } catch (e: unknown) {
+      if (e instanceof Error) {
+        setError(e.message)
+      } else {
+        setError("Невідома помилка")
+      }
+    }
+    setLoading(false)
+  }
+
+  const scheduleMidnightUpdate = () => {
+    const now = new Date()
+    const midnight = new Date()
+    midnight.setHours(24, 0, 0, 0)
+    const msToMidnight = midnight.getTime() - now.getTime()
+
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      updateDailyWord()
+      scheduleMidnightUpdate()
+    }, msToMidnight)
+  }
+
   useEffect(() => {
-    chrome.storage.local.get(["dailyWord", "history"], (res) => {
+    chrome.storage.local.get("dailyWord", (res) => {
       if (res.dailyWord) {
         setCurrent(res.dailyWord)
       } else {
-        const word = getRandomWord()
-        setNewWord(word)
-      }
-
-      if (res.history) {
-        setHistory(res.history)
+        updateDailyWord()
       }
     })
+    loadHistory()
+    scheduleMidnightUpdate()
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current)
+      }
+    }
   }, [])
 
-  if (!current) return <p>Loading...</p>
-
-  const visibleHistory = showAllHistory ? history : history.slice(-5)
+  const shortHistory = showAllHistory ? history : history.slice(-5)
 
   return (
-    <div style={{ padding: "1rem", fontFamily: "sans-serif", width: 280 }}>
-      <h2>{current.word}</h2>
-      <p>
-        <strong>Переклад:</strong> {current.translation}
-      </p>
-      <p>
-        <strong>Частина мови:</strong> {current.partOfSpeech}
-      </p>
-      <p>
-        <strong>Приклади:</strong>
-      </p>
-      <ul>
-        {current.examples.map((e, i) => (
-          <li key={i}>{e}</li>
-        ))}
-      </ul>
+    <div>
+      {loading && <p>Завантаження...</p>}
+      {error && (
+        <p className="error">
+          ⚠️ {error} <button onClick={updateDailyWord}>Спробувати ще</button>
+        </p>
+      )}
 
-      <button onClick={handleNext} style={{ display: 'block' }}>
-        Я знаю це слово
-      </button>
-      <button onClick={handleSaveOrRemove} style={{ marginTop: 5 }}>
-        {isInHistory(current) ? "Видалити з історії" : "Зберегти в історію"}
-      </button>
-
-      {history.length > 0 && (
+      {current && !loading && (
         <>
-          <hr />
-          <p>
-            <strong>Історія слів:</strong>
-          </p>
-          <ul
-            style={{
-              maxHeight: "100px",
-              overflowY: "auto",
-              fontSize: "0.9em",
-            }}
-          >
-            {[...visibleHistory]
-              .slice()
-              .reverse()
-              .map((w, i) => (
-                <li key={i}>
-                  {w.word} — {w.translation}
-                </li>
+          <div className="card">
+            <h3>{current.word}</h3>
+            <p>
+              <em>{current.partOfSpeech}</em>
+            </p>
+            <p>
+              <strong>Переклад:</strong> {current.translation}
+            </p>
+            <p>
+              <strong>Приклади:</strong>
+            </p>
+            <ul>
+              {current.examples.map((ex, i) => (
+                <li key={i}>{ex}</li>
               ))}
-          </ul>
+            </ul>
+            <div className="buttons">
+              <button onClick={updateDailyWord}>🔄 Інше слово</button>
+              <button onClick={toggleSave}>
+                {isSaved(current) ? "❌ Видалити" : "💾 Зберегти"}
+              </button>
+            </div>
+          </div>
 
-          {history.length > 5 && (
-            <button
-              onClick={() => setShowAllHistory(!showAllHistory)}
-              style={{ marginBottom: 8 }}
-            >
-              {showAllHistory ? "Сховати історію" : "Показати більше"}
-            </button>
+          {history.length > 0 && (
+            <div className="history">
+              <h4>📜 Історія</h4>
+              <ul style={{ fontSize: "0.9em" }}>
+                {[...shortHistory].reverse().map((h, i) => (
+                  <li key={i}>
+                    {h.word} — <i>{h.translation}</i>
+                  </li>
+                ))}
+              </ul>
+              {history.length > 5 && (
+                <button onClick={() => setShowAllHistory((p) => !p)}>
+                  {showAllHistory ? "Сховати" : "Показати більше"}
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  chrome.storage.local.remove("history")
+                  setHistory([])
+                  setShowAllHistory(false)
+                }}
+                className="clear-btn"
+              >
+                Очистити історію
+              </button>
+            </div>
           )}
-
-          <button
-            onClick={() => {
-              chrome.storage.local.remove("history")
-              setHistory([])
-              setShowAllHistory(false)
-            }}
-            style={{ color: "red" }}
-          >
-            Очистити історію
-          </button>
         </>
       )}
     </div>
