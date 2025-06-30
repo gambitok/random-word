@@ -4,10 +4,10 @@ const OPENROUTER_MODEL = import.meta.env.VITE_OPENROUTER_MODEL || "gpt-4o-mini"
 export async function fetchWordWithOpenRouter(word: string) {
   const prompt = `
   Please provide the following information about the English word "${word}":
-  1. Ukrainian translation (one or two words)
+  1. Ukrainian translation — exactly one or two Ukrainian words using Cyrillic letters only, without any Latin letters or transliteration, and without spelling mistakes.
   2. Part of speech (noun, verb, adjective, etc.)
-  3. Example sentences (3 examples) demonstrating usage.
-  Format the response as JSON with keys: translation, partOfSpeech, examples (array of strings).
+  3. Three example sentences in English showing the word in context.
+  Format the response as a JSON object with keys: translation, partOfSpeech, examples (array of strings).
   `
 
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -38,7 +38,7 @@ export async function fetchWordWithOpenRouter(word: string) {
 
   try {
     const parsed = JSON.parse(text)
-    return parsed // { translation, partOfSpeech, examples }
+    return parsed
   } catch {
     throw new Error("Failed to parse OpenRouter response JSON")
   }

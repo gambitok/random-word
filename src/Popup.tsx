@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react"
+import { useEffect, useState, useRef, useCallback } from "react"
 import { fetchWordWithOpenRouter } from "./api/openRouter"
 import "./App.css"
 
@@ -9,35 +9,96 @@ type Word = {
   examples: string[]
 }
 
+const STORAGE_KEYS = {
+  HISTORY: "history",
+  DAILY: "dailyWord"
+}
+
 export default function Popup() {
   const [current, setCurrent] = useState<Word | null>(null)
+  const [history, setHistory] = useState<Word[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [history, setHistory] = useState<Word[]>([])
   const [showAllHistory, setShowAllHistory] = useState(false)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
 
-  const loadHistory = () => {
-    chrome.storage.local.get("history", (res) => {
-      setHistory(res.history || [])
-    })
+  const getFromStorage = (key: string): Promise<Record<string, unknown>> =>
+    new Promise((resolve) => chrome.storage.local.get({ [key]: null }, resolve))
+
+  const setToStorage = (data: Record<string, unknown>): void =>
+    void chrome.storage.local.set(data)
+
+  const removeFromStorage = (key: string): void =>
+    void chrome.storage.local.remove(key)
+
+  const fetchRandomWord = async (): Promise<string | null> => {
+    const res = await fetch("https://random-word-api.herokuapp.com/word?number=1")
+    if (!res.ok) return null
+    const [word] = await res.json()
+    return word
   }
 
-  const saveToHistory = (word: Word) => {
-    if (history.find((w) => w.word === word.word)) return
+  const isSaved = useCallback((word: Word | null): boolean =>
+    !!word && history.some((w) => w.word === word.word)
+  , [history])
+
+  const updateDailyWord = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const random = await fetchRandomWord()
+      if (!random) throw new Error("Помилка отримання слова")
+
+      const data = await fetchWordWithOpenRouter(random)
+      const word: Word = { word: random, ...data }
+
+      setCurrent(word)
+      setToStorage({ [STORAGE_KEYS.DAILY]: word })
+    } catch (e: unknown) {
+      if (e instanceof Error) {
+        setError(e.message)
+      } else {
+        setError("Невідома помилка")
+      }
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  const scheduleMidnightUpdate = useCallback(() => {
+    const now = new Date()
+    const midnight = new Date()
+    midnight.setHours(24, 0, 0, 0)
+    const msToMidnight = midnight.getTime() - now.getTime()
+
+    if (timerRef.current) clearTimeout(timerRef.current)
+    timerRef.current = setTimeout(() => {
+      void updateDailyWord().then(() => {
+        scheduleMidnightUpdate()
+      })
+    }, msToMidnight)
+  }, [updateDailyWord])
+
+  const loadHistory = useCallback(async () => {
+    const res = await getFromStorage(STORAGE_KEYS.HISTORY)
+    const loaded = res[STORAGE_KEYS.HISTORY]
+    if (Array.isArray(loaded)) {
+      setHistory(loaded as Word[])
+    }
+  }, [])
+
+  const saveToHistory = useCallback((word: Word) => {
+    if (isSaved(word)) return
     const updated = [...history, word].slice(-100)
-    chrome.storage.local.set({ history: updated })
+    setToStorage({ [STORAGE_KEYS.HISTORY]: updated })
     setHistory(updated)
-  }
+  }, [history, isSaved])
 
-  const removeFromHistory = (word: Word) => {
+  const removeFromHistory = useCallback((word: Word) => {
     const updated = history.filter((w) => w.word !== word.word)
-    chrome.storage.local.set({ history: updated })
+    setToStorage({ [STORAGE_KEYS.HISTORY]: updated })
     setHistory(updated)
-  }
-
-  const isSaved = (word: Word | null) =>
-    word && history.some((w) => w.word === word.word)
+  }, [history])
 
   const toggleSave = () => {
     if (!current) return
@@ -48,70 +109,36 @@ export default function Popup() {
     }
   }
 
-  const fetchRandomWord = async (): Promise<string | null> => {
-    const res = await fetch("https://random-word-api.herokuapp.com/word?number=1")
-    if (!res.ok) return null
-    const [word] = await res.json()
-    return word || null
-  }
-
-  const updateDailyWord = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const random = await fetchRandomWord()
-      if (!random) throw new Error("Помилка отримання випадкового слова")
-
-      const data = await fetchWordWithOpenRouter(random)
-      const word: Word = { word: random, ...data }
-
-      setCurrent(word)
-      chrome.storage.local.set({ dailyWord: word })
-    } catch (e: unknown) {
-      if (e instanceof Error) {
-        setError(e.message)
-      } else {
-        setError("Невідома помилка")
-      }
-    }
-    setLoading(false)
-  }
-
-  const scheduleMidnightUpdate = () => {
-    const now = new Date()
-    const midnight = new Date()
-    midnight.setHours(24, 0, 0, 0)
-    const msToMidnight = midnight.getTime() - now.getTime()
-
-    if (timerRef.current) clearTimeout(timerRef.current)
-    timerRef.current = setTimeout(() => {
-      updateDailyWord()
-      scheduleMidnightUpdate()
-    }, msToMidnight)
+  const clearHistory = () => {
+    removeFromStorage(STORAGE_KEYS.HISTORY)
+    setHistory([])
+    setShowAllHistory(false)
   }
 
   useEffect(() => {
-    chrome.storage.local.get("dailyWord", (res) => {
-      if (res.dailyWord) {
-        setCurrent(res.dailyWord)
+    getFromStorage(STORAGE_KEYS.DAILY).then((res) => {
+      const word = res[STORAGE_KEYS.DAILY]
+      if (word && typeof word === "object") {
+        setCurrent(word as Word)
       } else {
         updateDailyWord()
       }
     })
+
     loadHistory()
     scheduleMidnightUpdate()
+
     return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current)
-      }
+      if (timerRef.current) clearTimeout(timerRef.current)
     }
-  }, [])
+  }, [loadHistory, updateDailyWord, scheduleMidnightUpdate])
 
   const shortHistory = showAllHistory ? history : history.slice(-5)
 
   return (
     <div>
       {loading && <p>Завантаження...</p>}
+
       {error && (
         <p className="error">
           ⚠️ {error} <button onClick={updateDailyWord}>Спробувати ще</button>
@@ -122,15 +149,9 @@ export default function Popup() {
         <>
           <div className="card">
             <h3>{current.word}</h3>
-            <p>
-              <em>{current.partOfSpeech}</em>
-            </p>
-            <p>
-              <strong>Переклад:</strong> {current.translation}
-            </p>
-            <p>
-              <strong>Приклади:</strong>
-            </p>
+            <p><em>{current.partOfSpeech}</em></p>
+            <p><strong>Переклад:</strong> {current.translation}</p>
+            <p><strong>Приклади:</strong></p>
             <ul>
               {current.examples.map((ex, i) => (
                 <li key={i}>{ex}</li>
@@ -155,18 +176,11 @@ export default function Popup() {
                 ))}
               </ul>
               {history.length > 5 && (
-                <button onClick={() => setShowAllHistory((p) => !p)}>
+                <button onClick={() => setShowAllHistory((prev) => !prev)}>
                   {showAllHistory ? "Сховати" : "Показати більше"}
                 </button>
               )}
-              <button
-                onClick={() => {
-                  chrome.storage.local.remove("history")
-                  setHistory([])
-                  setShowAllHistory(false)
-                }}
-                className="clear-btn"
-              >
+              <button onClick={clearHistory} className="clear-btn">
                 Очистити історію
               </button>
             </div>

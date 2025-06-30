@@ -63,6 +63,7 @@
 }
 
 .clear-btn {
+  display: block;
   color: red;
   background: none;
   border: none;

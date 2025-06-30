@@ -1,18 +1,23 @@
 {
-    "manifest_version": 3,
-    "name": "English Word of the Day",
-    "version": "1.0",
-    "description": "Learn a new English word every day!",
-    "action": {
-      "default_popup": "index.html",
-      "default_icon": "icon.png"
-    },
-    "background": {
-      "service_worker": "background.js"
-    },
-    "permissions": ["storage", "alarms"],
-    "icons": {
-      "128": "icon.png"
+  "manifest_version": 3,
+  "name": "English Word of the Day",
+  "version": "1.0",
+  "description": "Learn a new English word every day!",
+  "action": {
+    "default_popup": "index.html",
+    "default_icon": "icon.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["storage", "alarms"],
+  "icons": {
+    "128": "icon.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["topics.json"],
+      "matches": ["<all_urls>"]
     }
-  }
-  
+  ]
+}
